@@ -49,7 +49,7 @@ class DailyEvaluate:
     def daily_update(self, new_transshipment, t):
         # constraint check
         try:
-            # decision format: shape (number of fdc, number of sku)
+            # decision format: shape (number of fdc, number of sku -- 5*1000)
             assert new_transshipment.shape == (len(self.dc_list)-1, len(self.sku_list)), 'invalid decision format '
             # inventory decision should be nonnegative integers
             assert np.all(new_transshipment >= 0), 'negative transshipment'
@@ -62,28 +62,32 @@ class DailyEvaluate:
             # constraint on transship capacity for each fdc
             assert np.all(new_transshipment.sum(axis = 1) <= self.capacity_limit), 'capacity limits violation'
 
+            'Morning: update RDC stock'
             # update rdc on hand inventory, fdc intransit transship inventory according to new_transshipment
-            self.inv[0] -= new_transshipment.sum(axis =0)
-
+            self.inv[0] -= new_transshipment.sum(axis =0)          # Morning: ship item w(t) --> FDC: w(t)=intransit_transshipment
+                                                                   # >>> Calculate I_R  
             # the rdc inventory should be nonnegative after transshipment
             assert np.all(self.inv[0] >= 0), 'transshipment should not greater than RDC inventory'
-            self.intransit_transshipment = new_transshipment
+            self.intransit_transshipment = new_transshipment       # >>> for FDC to use 
 
         except Exception as e:
             # invalid decision
             # print(e)
             return {'status':False, 'constraints_violation':e}
 
+
+        'start from t=0: Daytime'
         # demand realization, record leftover inventory and corresponding costs    
         # fdc local inventory only fulfills local demand
-        _fdc_sales = np.minimum(self.true_demand[t][1:], self.inv[1:])
-        _spill_over = np.floor(((self.true_demand[t][1:]-_fdc_sales).T * (1-self.abandon_rate)).T)
+        _fdc_sales = np.minimum(self.true_demand[t][1:], self.inv[1:])            # Sold item
+        _spill_over = np.floor(( (self.true_demand[t][1:]-_fdc_sales).T * (1-self.abandon_rate) ).T)    # [(1000*5)*(5,)].T -> 5*1000: floor|(1-alpha)(d_ijt-I_ijt)|+
+
         # spillover demand is firstly fulfilled by intransit transshipment to that FDC
-        _transship_sales = np.minimum(_spill_over, self.intransit_transshipment) 
-        _spill_over -= _transship_sales
+        _transship_sales = np.minimum(_spill_over, self.intransit_transshipment)  # FDC by w(t): |floor|(1-alpha)(d_ijt-I_ijt)|+ - w_ijt|+
+        _spill_over -= _transship_sales                                           # residue if any: if w(t) > intransit -> no need to RDC 
 
         # rdc inventory fulfills rdc demand and fdc spillover demand 
-        _rdc_tot_demand =  self.true_demand[t][0] + _spill_over.sum(axis=0)
+        _rdc_tot_demand =  self.true_demand[t][0] + _spill_over.sum(axis=0)       # total demand: dR_it + |floor|(1-alpha)(d_ijt-I_ijt)|+ - w_ijt|+
         _rdc_sales =  np.minimum(_rdc_tot_demand, self.inv[0])
 
         # deduct inventory has been sold 
@@ -92,14 +96,16 @@ class DailyEvaluate:
         self.inv[0] -= _rdc_sales.astype(int)
 
         # calculate inventory cost
+        # true_demand: sample*(6*1000)
         _lost_sale = self.true_demand[t].sum(axis=0) - (_fdc_sales.sum(axis=0) + _transship_sales.sum(axis = 0) + _rdc_sales)
         self.shortage_cost += (_lost_sale* self.sku_cost).sum()
         self.extra_shipping_cost += self.extra_shipping_cost_per_unit * np.maximum(_rdc_sales - self.true_demand[t][0], np.zeros(len(self.sku_list)).astype(int) ).sum()
 
- 
+        'start from t=0: Night: receive items'
         # update on hand inventory after receiving intransit replenishment and transshipment
-        self.inv[0] += self.inventory_replenishment[0]
-        self.inventory_replenishment = self.inventory_replenishment[1:]
+        self.inv[0] += self.inventory_replenishment[0]                  # RDC
+        self.inventory_replenishment = self.inventory_replenishment[1:] # RDC tomorrow income
+
         self.inv[1:] += self.intransit_transshipment
         return {'status':True}
 
@@ -169,8 +175,8 @@ if __name__ == '__main__':
              sku_demand_distribution.copy(deep=True), sku_cost.copy(deep=True))
 
         for t in range(1, days+1):
-            transship_decision = some_policy.daily_decision(t)
-            update_return = instance.daily_update(transship_decision, t-1)
+            transship_decision = some_policy.daily_decision(t)              # read policy: from t=1, decision: np.array with 5*1000
+            update_return = instance.daily_update(transship_decision, t-1)  # update instance from t = 0, t <- t+1
             if update_return['status']:
                 if t <days:
                     tday_inventory = pd.DataFrame([[s, d, instance.inv[d][s-1] ] for d in dc_list for s in sku_list ], \

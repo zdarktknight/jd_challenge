@@ -403,6 +403,7 @@ class UserPolicy:
                 feasible_solution.append(w)
         Daily_solution = self.sol_filter(feasible_solution)
         self.w_last = Daily_solution
+        
         transshipment_decision = np.transpose(Daily_solution)
         return transshipment_decision
 
