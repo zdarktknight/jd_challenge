@@ -76,7 +76,7 @@ class DailyEvaluate:
             return {'status':False, 'constraints_violation':e}
 
 
-        'start from t=0: Daytime'
+        'Daytime: start from t=0'
         # demand realization, record leftover inventory and corresponding costs    
         # fdc local inventory only fulfills local demand
         _fdc_sales = np.minimum(self.true_demand[t][1:], self.inv[1:])            # Sold item
@@ -101,7 +101,7 @@ class DailyEvaluate:
         self.shortage_cost += (_lost_sale* self.sku_cost).sum()
         self.extra_shipping_cost += self.extra_shipping_cost_per_unit * np.maximum(_rdc_sales - self.true_demand[t][0], np.zeros(len(self.sku_list)).astype(int) ).sum()
 
-        'start from t=0: Night: receive items'
+        'Night: receive items'
         # update on hand inventory after receiving intransit replenishment and transshipment
         self.inv[0] += self.inventory_replenishment[0]                  # RDC
         self.inventory_replenishment = self.inventory_replenishment[1:] # RDC tomorrow income
